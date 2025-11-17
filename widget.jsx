@@ -1,4 +1,3 @@
-// widget.js - FIXED: No refresh on typing + Reliable parsing + Products in bubble
 (function() {
   'use strict';
 
@@ -42,7 +41,7 @@
     document.head.appendChild(tailwindScript);
   }
 
-  // IMPROVED: Universal Product Parser - handles multiple formats
+  // Product Parser
   function parseProducts(message) {
     const products = [];
     const lines = message.split('\n');
@@ -53,17 +52,11 @@
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       
-      // Pattern 1: "1. Name - Description. Price: $XX.XX. [View Product](url) ![Image](url)"
       const pattern1 = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?)\.\s+Price:\s+\$?([\d,]+\.?\d*)/i);
-      
-      // Pattern 2: "1. Name - Description - Price: $XX.XX" (multi-line format)
       const pattern2 = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?)\s+-\s+Price:\s+\$?([\d,]+\.?\d*(?:\s*-\s*\$?[\d,]+\.?\d*)?)/i);
-      
-      // Pattern 3: "1. Name (Description) - Price: $XX.XX"
       const pattern3 = line.match(/^(\d+)\.\s+(.+?)\s+\(([^)]+)\)\s+-\s+Price:\s+\$?([\d,]+\.?\d*)/i);
       
       if (pattern1 || pattern2 || pattern3) {
-        // Save previous product if exists
         if (currentProduct && (currentProduct.link || currentProduct.image)) {
           products.push(currentProduct);
         }
@@ -72,99 +65,58 @@
         currentProduct = {
           name: match[2].trim(),
           description: match[3].trim(),
-          price: match[4].trim().replace(/\s*-.*$/, ''), // Remove price ranges for now
+          price: match[4].trim().replace(/\s*-.*$/, ''),
           link: null,
           image: null
         };
         console.log('✅ Found product:', currentProduct.name);
         
-        // Check for inline link and image in same line
         const inlineLink = line.match(/\[View Product\]\((https?:\/\/[^\)]+)\)/i);
-        if (inlineLink) {
-          currentProduct.link = inlineLink[1].trim();
-        }
+        if (inlineLink) currentProduct.link = inlineLink[1].trim();
         
         const inlineImage = line.match(/!\[(?:Image|[^\]]*)\]\((https?:\/\/[^\)]+)\)/);
-        if (inlineImage) {
-          currentProduct.image = inlineImage[1].trim();
-        }
+        if (inlineImage) currentProduct.image = inlineImage[1].trim();
         
         continue;
       }
       
-      // Look for standalone "Link:" or "View Product:"
       if (currentProduct) {
-        // Match: "Link: http://..."
         const linkMatch1 = line.match(/^(?:-\s*)?Link:\s*(https?:\/\/\S+)/i);
-        // Match: "[View Product](url)"
         const linkMatch2 = line.match(/\[View Product\]\((https?:\/\/[^\)]+)\)/i);
-        // Match standalone URL after previous product
         const linkMatch3 = line.match(/^(https?:\/\/(?:www\.)?tentree\.com\/products\/[^\s]+)/i);
         
-        if (linkMatch1) {
-          currentProduct.link = linkMatch1[1].trim();
-          console.log('🔗 Found link:', currentProduct.link);
-        } else if (linkMatch2) {
-          currentProduct.link = linkMatch2[1].trim();
-          console.log('🔗 Found link:', currentProduct.link);
-        } else if (linkMatch3 && !currentProduct.link) {
-          currentProduct.link = linkMatch3[1].trim();
-          console.log('🔗 Found link:', currentProduct.link);
-        }
+        if (linkMatch1) currentProduct.link = linkMatch1[1].trim();
+        else if (linkMatch2) currentProduct.link = linkMatch2[1].trim();
+        else if (linkMatch3 && !currentProduct.link) currentProduct.link = linkMatch3[1].trim();
         
-        // Match: "Image: ![Link](url)" or "- Image: ![Link](url)"
         const imageMatch1 = line.match(/(?:-\s*)?Image:\s*!\[(?:[^\]]*)\]\((https?:\/\/[^\)]+)\)/i);
-        // Match: "![Image](url)"
         const imageMatch2 = line.match(/!\[(?:Image|Link|[^\]]*)\]\((https?:\/\/[^\)]+)\)/);
-        // Match standalone image URL
         const imageMatch3 = line.match(/^(https?:\/\/cdn\.shopify\.com\/[^\s]+)/i);
         
-        if (imageMatch1) {
-          currentProduct.image = imageMatch1[1].trim();
-          console.log('🖼️ Found image:', currentProduct.image);
-        } else if (imageMatch2 && !currentProduct.image) {
-          currentProduct.image = imageMatch2[1].trim();
-          console.log('🖼️ Found image:', currentProduct.image);
-        } else if (imageMatch3 && !currentProduct.image) {
-          currentProduct.image = imageMatch3[1].trim();
-          console.log('🖼️ Found image:', currentProduct.image);
-        }
+        if (imageMatch1) currentProduct.image = imageMatch1[1].trim();
+        else if (imageMatch2 && !currentProduct.image) currentProduct.image = imageMatch2[1].trim();
+        else if (imageMatch3 && !currentProduct.image) currentProduct.image = imageMatch3[1].trim();
       }
     }
     
-    // Don't forget the last product
     if (currentProduct && (currentProduct.link || currentProduct.image)) {
       products.push(currentProduct);
     }
     
-    console.log(`📦 Total products parsed: ${products.length}`, products);
+    console.log(`📦 Total products parsed: ${products.length}`);
     return products;
   }
 
-  // IMPROVED: Better markdown stripping
   function stripProductMarkdown(message) {
     let cleaned = message;
-    
-    // Remove numbered product lines with all their details
     cleaned = cleaned.replace(/^\d+\.\s+.+?\s+-\s+.+?(?:\s+-\s+Price:|\.\s+Price:)\s+\$?[\d,]+\.?\d*(?:\s*-\s*\$?[\d,]+\.?\d*)?.*$/gim, '');
-    
-    // Remove "Available sizes" lines
     cleaned = cleaned.replace(/^\s*-?\s*Available sizes?:.*$/gim, '');
-    
-    // Remove link lines
     cleaned = cleaned.replace(/^\s*-?\s*Link:\s*https?:\/\/.*$/gim, '');
     cleaned = cleaned.replace(/\[View Product\]\(https?:\/\/[^\)]+\)/gi, '');
-    
-    // Remove image lines
     cleaned = cleaned.replace(/^\s*-?\s*Image:\s*!\[.*$/gim, '');
     cleaned = cleaned.replace(/!\[(?:Image|Link|[^\]]*)\]\(https?:\/\/[^\)]+\)/g, '');
-    
-    // Remove standalone URLs
     cleaned = cleaned.replace(/^https?:\/\/.*$/gm, '');
-    
-    // Clean up extra whitespace
     cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-    
     return cleaned;
   }
 
@@ -182,11 +134,8 @@
         box-sizing: border-box;
       }
       
-      /* FORCE rounded corners for chat bubbles */
       #rokovo-widget-root .chat-bubble {
         border-radius: 18px !important;
-        -webkit-border-radius: 18px !important;
-        -moz-border-radius: 18px !important;
       }
       
       #rokovo-widget-root .chat-bubble-user {
@@ -227,6 +176,87 @@
       
       #rokovo-widget-root .scrollbar-thin::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.3);
+      }
+      
+      /* Carousel Styles */
+      #rokovo-widget-root .carousel-container {
+        position: relative;
+        overflow: hidden;
+        border-radius: 12px;
+      }
+      
+      #rokovo-widget-root .carousel-track {
+        display: flex;
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: transform;
+      }
+      
+      #rokovo-widget-root .carousel-slide {
+        flex-shrink: 0;
+        width: 100%;
+        padding: 0 4px;
+      }
+      
+      #rokovo-widget-root .carousel-nav-button {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        z-index: 10;
+      }
+      
+      #rokovo-widget-root .carousel-nav-button:hover {
+        background: rgba(0, 0, 0, 0.9);
+        transform: translateY(-50%) scale(1.1);
+      }
+      
+      #rokovo-widget-root .carousel-nav-button:active {
+        transform: translateY(-50%) scale(0.95);
+      }
+      
+      #rokovo-widget-root .carousel-nav-button.prev {
+        left: 8px;
+      }
+      
+      #rokovo-widget-root .carousel-nav-button.next {
+        right: 8px;
+      }
+      
+      #rokovo-widget-root .carousel-dots {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 12px;
+      }
+      
+      #rokovo-widget-root .carousel-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.3);
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      
+      #rokovo-widget-root .carousel-dot.active {
+        width: 20px;
+        border-radius: 3px;
+        background: currentColor;
+      }
+      
+      #rokovo-widget-root .carousel-dot:hover:not(.active) {
+        background: rgba(255, 255, 255, 0.5);
       }
       
       @keyframes rokovo-bounce {
@@ -278,7 +308,6 @@
         animation: rokovo-slide-up 0.3s ease-out;
       }
       
-      /* Product card hover effects */
       #rokovo-widget-root .product-card {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
@@ -296,7 +325,6 @@
         transform: scale(1.05);
       }
       
-      /* Prevent body scroll when chat is open on mobile */
       body.rokovo-chat-open {
         overflow: hidden;
       }
@@ -314,18 +342,6 @@
           max-height: 100% !important;
           border-radius: 0 !important;
         }
-      }
-      
-      /* Loading shimmer effect */
-      @keyframes shimmer {
-        0% { background-position: -200% 0; }
-        100% { background-position: 200% 0; }
-      }
-      
-      #rokovo-widget-root .loading-shimmer {
-        background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
       }
     `;
     document.head.appendChild(styles);
@@ -347,7 +363,6 @@
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
 
-    // Detect mobile
     useEffect(() => {
       const checkMobile = () => setIsMobile(window.innerWidth < 640);
       checkMobile();
@@ -355,7 +370,6 @@
       return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // Manage body scroll
     useEffect(() => {
       if (isOpen && isMobile) {
         document.body.classList.add('rokovo-chat-open');
@@ -389,9 +403,7 @@
           body: JSON.stringify({ externalUserId: `external_${Date.now()}` })
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
         setSessionId(data.data.sessionId);
@@ -442,9 +454,7 @@
           })
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
         
@@ -461,7 +471,7 @@
           role: 'assistant'
         }]);
       } finally {
-        setIsTyping(false);
+        setIsTyping(false;
         inputRef.current?.focus();
       }
     };
@@ -473,17 +483,14 @@
       }
     };
 
-    // Memoized Product Card Component - prevents re-render
-    const ProductCard = React.memo(({ product, index, primaryColor }) => (
+    // Product Card Component
+    const ProductCard = React.memo(({ product, primaryColor }) => (
       React.createElement('a', {
         href: product.link,
         target: '_blank',
         rel: 'noopener noreferrer',
-        className: 'product-card block bg-gradient-to-br from-gray-800/60 to-gray-900/60 border border-gray-700/50 overflow-hidden hover:border-gray-600 animate-fade-in',
-        style: { 
-          textDecoration: 'none',
-          animationDelay: `${index * 0.08}s`
-        }
+        className: 'product-card block bg-gradient-to-br from-gray-800/80 to-gray-900/80 border border-gray-700/50 animate-fade-in',
+        style: { textDecoration: 'none' }
       },
         product.image && React.createElement('div', {
           className: 'w-full bg-gray-900 relative overflow-hidden',
@@ -495,13 +502,12 @@
             className: 'absolute inset-0 w-full h-full object-cover',
             loading: 'lazy',
             onError: (e) => {
-              console.warn('Failed to load image:', product.image);
               e.target.style.display = 'none';
               const parent = e.target.parentElement;
               if (parent) {
                 parent.innerHTML = `
                   <div class="absolute inset-0 flex items-center justify-center bg-gray-800/50">
-                    <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-12 h-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -510,39 +516,40 @@
             }
           })
         ),
-        React.createElement('div', { className: 'p-3.5' },
+        React.createElement('div', { className: 'p-4' },
           React.createElement('h4', {
-            className: 'text-white font-semibold text-sm mb-1.5 line-clamp-2',
-            style: { minHeight: '2.5rem', lineHeight: '1.25rem' }
+            className: 'text-white font-semibold text-base mb-2 line-clamp-2',
+            style: { minHeight: '3rem', lineHeight: '1.5rem' }
           }, product.name),
           product.description && React.createElement('p', {
-            className: 'text-gray-400 text-xs mb-2.5 line-clamp-2',
-            style: { minHeight: '2rem', fontSize: '11px', lineHeight: '1rem' }
+            className: 'text-gray-400 text-sm mb-3 line-clamp-2',
+            style: { minHeight: '2.5rem', lineHeight: '1.25rem' }
           }, product.description),
           React.createElement('div', {
-            className: 'flex items-center justify-between mt-2'
+            className: 'flex items-center justify-between mt-3 pt-3 border-t border-gray-700/50'
           },
             React.createElement('div', {
               className: 'flex flex-col'
             },
               React.createElement('span', {
-                className: 'text-gray-500 text-xs mb-0.5'
+                className: 'text-gray-500 text-xs mb-1'
               }, 'Price'),
               React.createElement('p', {
-                className: 'font-bold text-base',
+                className: 'font-bold text-xl',
                 style: { color: primaryColor }
               }, `$${product.price}`)
             ),
             React.createElement('div', {
-              className: 'flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-all',
+              className: 'flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-lg transition-all hover:scale-105',
               style: { 
-                background: `${primaryColor}12`,
-                color: primaryColor
+                background: `${primaryColor}15`,
+                color: primaryColor,
+                border: `1px solid ${primaryColor}30`
               }
             },
-              React.createElement('span', null, 'View'),
+              React.createElement('span', null, 'View Details'),
               React.createElement('svg', {
-                className: 'w-3.5 h-3.5',
+                className: 'w-4 h-4',
                 fill: 'none',
                 stroke: 'currentColor',
                 viewBox: '0 0 24 24',
@@ -558,7 +565,151 @@
       )
     ));
 
-    // Memoized Message Component - prevents re-render on input change
+    // Product Carousel Component
+    const ProductCarousel = React.memo(({ products, primaryColor }) => {
+      const [currentIndex, setCurrentIndex] = useState(0);
+      const [touchStart, setTouchStart] = useState(null);
+      const [touchEnd, setTouchEnd] = useState(null);
+      const carouselRef = useRef(null);
+
+      const minSwipeDistance = 50;
+
+      const nextSlide = useCallback(() => {
+        setCurrentIndex(prev => (prev + 1) % products.length);
+      }, [products.length]);
+
+      const prevSlide = useCallback(() => {
+        setCurrentIndex(prev => (prev - 1 + products.length) % products.length);
+      }, [products.length]);
+
+      const goToSlide = useCallback((index) => {
+        setCurrentIndex(index);
+      }, []);
+
+      const onTouchStart = (e) => {
+        setTouchEnd(null);
+        setTouchStart(e.targetTouches[0].clientX);
+      };
+
+      const onTouchMove = (e) => {
+        setTouchEnd(e.targetTouches[0].clientX);
+      };
+
+      const onTouchEnd = () => {
+        if (!touchStart || !touchEnd) return;
+        
+        const distance = touchStart - touchEnd;
+        const isLeftSwipe = distance > minSwipeDistance;
+        const isRightSwipe = distance < -minSwipeDistance;
+
+        if (isLeftSwipe) nextSlide();
+        if (isRightSwipe) prevSlide();
+      };
+
+      if (products.length === 0) return null;
+
+      return React.createElement('div', {
+        className: 'w-full mt-3'
+      },
+        React.createElement('div', {
+          className: 'carousel-container relative',
+          onTouchStart,
+          onTouchMove,
+          onTouchEnd
+        },
+          // Carousel Track
+          React.createElement('div', {
+            ref: carouselRef,
+            className: 'carousel-track',
+            style: {
+              transform: `translateX(-${currentIndex * 100}%)`
+            }
+          },
+            products.map((product, idx) =>
+              React.createElement('div', {
+                key: idx,
+                className: 'carousel-slide'
+              },
+                React.createElement(ProductCard, { product, primaryColor })
+              )
+            )
+          ),
+
+          // Navigation Buttons (only show if more than 1 product)
+          products.length > 1 && React.createElement(React.Fragment, null,
+            React.createElement('button', {
+              onClick: prevSlide,
+              className: 'carousel-nav-button prev',
+              'aria-label': 'Previous product',
+              style: { 
+                opacity: currentIndex === 0 ? 0.5 : 1,
+                cursor: currentIndex === 0 ? 'default' : 'pointer'
+              }
+            },
+              React.createElement('svg', {
+                className: 'w-5 h-5',
+                fill: 'none',
+                stroke: 'currentColor',
+                viewBox: '0 0 24 24',
+                strokeWidth: '3',
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round'
+              },
+                React.createElement('path', { d: 'M15 18l-6-6 6-6' })
+              )
+            ),
+            React.createElement('button', {
+              onClick: nextSlide,
+              className: 'carousel-nav-button next',
+              'aria-label': 'Next product',
+              style: { 
+                opacity: currentIndex === products.length - 1 ? 0.5 : 1,
+                cursor: currentIndex === products.length - 1 ? 'default' : 'pointer'
+              }
+            },
+              React.createElement('svg', {
+                className: 'w-5 h-5',
+                fill: 'none',
+                stroke: 'currentColor',
+                viewBox: '0 0 24 24',
+                strokeWidth: '3',
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round'
+              },
+                React.createElement('path', { d: 'M9 18l6-6-6-6' })
+              )
+            )
+          )
+        ),
+
+        // Dots Navigation (only show if more than 1 product)
+        products.length > 1 && React.createElement('div', {
+          className: 'carousel-dots',
+          style: { color: primaryColor }
+        },
+          products.map((_, idx) =>
+            React.createElement('button', {
+              key: idx,
+              onClick: () => goToSlide(idx),
+              className: `carousel-dot ${idx === currentIndex ? 'active' : ''}`,
+              'aria-label': `Go to product ${idx + 1}`,
+              style: idx === currentIndex ? { background: primaryColor } : {}
+            })
+          )
+        ),
+
+        // Product Counter
+        products.length > 1 && React.createElement('div', {
+          className: 'text-center mt-2'
+        },
+          React.createElement('span', {
+            className: 'text-gray-500 text-xs'
+          }, `${currentIndex + 1} of ${products.length} products`)
+        )
+      );
+    });
+
+    // Message Component
     const Message = React.memo(({ message, index, primaryColor, isMobile }) => {
       const products = useMemo(() => {
         return message.role === 'assistant' ? parseProducts(message.content) : [];
@@ -567,8 +718,6 @@
       const textContent = useMemo(() => {
         return products.length > 0 ? stripProductMarkdown(message.content) : message.content;
       }, [message.content, products.length]);
-      
-      const hasProducts = products.length > 0;
 
       return React.createElement('div', {
         className: `flex gap-3 mb-4 animate-slide-up ${message.role === 'user' ? 'justify-end' : 'items-start'}`,
@@ -597,7 +746,7 @@
           )
         ),
         React.createElement('div', {
-          className: `flex flex-col ${message.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'}`
+          className: `flex flex-col ${message.role === 'user' ? 'max-w-[80%]' : 'max-w-[90%]'}`
         },
           React.createElement('div', {
             className: `chat-bubble ${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'} px-4 py-3 shadow-md`,
@@ -605,46 +754,28 @@
               background: `linear-gradient(135deg, ${primaryColor}, ${primaryColor}dd)`,
               color: 'white',
               fontSize: '14px',
-              lineHeight: '1.6',
-              borderRadius: '18px',
-              borderBottomRightRadius: '6px'
+              lineHeight: '1.6'
             } : {
               background: 'rgba(31, 41, 55, 0.7)',
               border: '1px solid rgba(75, 85, 99, 0.5)',
               color: 'rgb(243, 244, 246)',
               fontSize: '14px',
-              lineHeight: '1.6',
-              borderRadius: '18px',
-              borderBottomLeftRadius: '6px'
+              lineHeight: '1.6'
             }
           },
             textContent && React.createElement('div', {
-              className: hasProducts ? 'mb-3' : '',
               style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
             }, textContent),
-            hasProducts && React.createElement('div', {
-              className: 'grid gap-2.5 mt-3',
-              style: { 
-                gridTemplateColumns: products.length === 1 
-                  ? '1fr' 
-                  : isMobile 
-                    ? 'repeat(auto-fill, minmax(145px, 1fr))'
-                    : 'repeat(auto-fill, minmax(165px, 1fr))'
-              }
-            }, products.map((product, idx) =>
-              React.createElement(ProductCard, { 
-                key: `${message.id}-product-${idx}`, 
-                product,
-                index: idx,
-                primaryColor
-              })
-            ))
+            products.length > 0 && React.createElement(ProductCarousel, {
+              products,
+              primaryColor
+            })
           )
         )
       );
     });
 
-    // Memoized Typing Indicator
+    // Typing Indicator
     const TypingIndicator = React.memo(({ primaryColor, agentName }) => (
       React.createElement('div', {
         className: 'flex gap-3 items-start mb-4 animate-fade-in'
@@ -674,9 +805,7 @@
           className: 'chat-bubble chat-bubble-assistant px-4 py-3 flex items-center gap-3 shadow-md',
           style: {
             background: 'rgba(31, 41, 55, 0.7)',
-            border: '1px solid rgba(75, 85, 99, 0.5)',
-            borderRadius: '18px',
-            borderBottomLeftRadius: '6px'
+            border: '1px solid rgba(75, 85, 99, 0.5)'
           }
         },
           React.createElement('span', {
@@ -702,7 +831,6 @@
       )
     ));
 
-    // Memoize the messages list to prevent unnecessary re-renders
     const messagesList = useMemo(() => (
       messages.map((msg, idx) =>
         React.createElement(Message, { 
@@ -720,7 +848,7 @@
       className: 'fixed bottom-6 right-6 z-[999999]',
       style: { fontFamily: 'Inter, system-ui, sans-serif' }
     },
-      // Enhanced Toggle Button
+      // Toggle Button
       React.createElement('button', {
         onClick: toggleChat,
         className: 'relative w-16 h-16 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95 focus:outline-none focus:ring-4 focus:ring-opacity-50',
@@ -789,7 +917,7 @@
           borderRadius: '24px'
         }
       },
-        // Enhanced Header
+        // Header
         React.createElement('div', {
           className: 'border-b border-gray-800 p-5 flex items-center gap-3',
           style: { 
@@ -825,7 +953,7 @@
               }),
               React.createElement('span', {
                 className: 'text-gray-400 text-xs'
-              }, 'Online • Ready to help')
+              }, 'Online')
             )
           ),
           !isMobile && React.createElement('button', {
@@ -847,7 +975,7 @@
           )
         ),
 
-        // Messages Area
+        // Messages
         React.createElement('div', {
           className: 'flex-1 overflow-y-auto p-5 scrollbar-thin',
           style: { minHeight: 0 }
@@ -891,7 +1019,7 @@
               }, error),
               React.createElement('button', {
                 onClick: initSession,
-                className: 'px-6 py-3 rounded-xl text-white text-sm font-medium transition-all hover:shadow-lg active:scale-95 focus:outline-none focus:ring-2 focus:ring-opacity-50',
+                className: 'px-6 py-3 rounded-xl text-white text-sm font-medium transition-all hover:shadow-lg active:scale-95',
                 style: { 
                   background: config.primaryColor,
                   boxShadow: `0 4px 12px ${config.primaryColor}40`
@@ -909,7 +1037,7 @@
             )
         ),
 
-        // Enhanced Input Area
+        // Input
         React.createElement('div', {
           className: 'border-t border-gray-800 p-4',
           style: { background: 'rgb(17 24 39 / 0.9)' }
@@ -933,23 +1061,20 @@
               className: 'flex-1 bg-gray-800 border border-gray-700 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-600 focus:ring-2 focus:ring-opacity-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed',
               style: { 
                 fontSize: '14px',
-                borderRadius: '14px',
-                focusRing: config.primaryColor
+                borderRadius: '14px'
               }
             }),
             React.createElement('button', {
               onClick: sendMessage,
               disabled: !input.trim() || isTyping || isLoading || !sessionId || error,
-              className: 'text-white font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg active:scale-95 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-opacity-50',
+              className: 'text-white font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg active:scale-95 flex items-center justify-center',
               style: { 
                 background: config.primaryColor,
                 minWidth: '54px',
                 padding: '12px 16px',
                 borderRadius: '14px',
-                focusRing: config.primaryColor,
                 boxShadow: !input.trim() ? 'none' : `0 4px 12px ${config.primaryColor}40`
-              },
-              'aria-label': 'Send message'
+              }
             },
               React.createElement('svg', {
                 className: 'w-5 h-5',
@@ -1013,27 +1138,22 @@
 
     console.log('🚀 Rokovo Widget: Initializing...', config);
 
-    // Load dependencies
     await loadDependencies();
     loadTailwind();
     injectStyles();
 
-    // Wait for Tailwind
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Create container
     const container = document.createElement('div');
     container.id = `rokovo-widget-${config.publishableKey}`;
     document.body.appendChild(container);
 
-    // Render widget
     const root = window.ReactDOM.createRoot(container);
     root.render(window.React.createElement(RokovoWidget, { config }));
     
     console.log('✅ Rokovo Widget: Loaded successfully!');
   }
 
-  // Auto-initialize
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
