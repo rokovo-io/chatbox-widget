@@ -53,7 +53,7 @@
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       
-      const pattern1 = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?)\.\s+Price:\s+\$?([\d,]+\.?\d*)/i);
+      const pattern1 = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?),\s+\$?([\d,]+\.?\d*(?:\s+to\s+\$?[\d,]+\.?\d*)?)/i);
       const pattern2 = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?)\s+-\s+Price:\s+\$?([\d,]+\.?\d*(?:\s*-\s*\$?[\d,]+\.?\d*)?)/i);
       const pattern3 = line.match(/^(\d+)\.\s+(.+?)\s+\(([^)]+)\)\s+-\s+Price:\s+\$?([\d,]+\.?\d*)/i);
       
@@ -66,7 +66,7 @@
         currentProduct = {
           name: match[2].trim(),
           description: match[3].trim(),
-          price: match[4].trim().replace(/\s*-.*$/, ''),
+          price: match[4].trim().replace(/\s*(?:to|-)\s*\$?[\d,]+\.?\d*/, ''),
           link: null,
           image: null
         };
@@ -84,7 +84,7 @@
       if (currentProduct) {
         const linkMatch1 = line.match(/^(?:-\s*)?Link:\s*(https?:\/\/\S+)/i);
         const linkMatch2 = line.match(/\[View Product\]\((https?:\/\/[^\)]+)\)/i);
-        const linkMatch3 = line.match(/^(https?:\/\/(?:www\.)?tentree\.com\/products\/[^\s]+)/i);
+        const linkMatch3 = line.match(/^(https?:\/\/(?:www\.)?[^\s]+\.com\/products\/[^\s]+)/i);
         
         if (linkMatch1) currentProduct.link = linkMatch1[1].trim();
         else if (linkMatch2) currentProduct.link = linkMatch2[1].trim();
@@ -108,73 +108,62 @@
     return products;
   }
 
-  // NEW: Split message into sections with product placeholder
-  function parseMessageSections(message) {
+  // IMPROVED: Split message and insert carousel placeholder
+  function parseMessageWithProducts(message) {
     const lines = message.split('\n');
-    let sections = [];
-    let currentText = [];
+    let beforeProducts = [];
+    let afterProducts = [];
     let inProductSection = false;
-    let productStartIndex = -1;
+    let productSectionEnded = false;
+    let firstProductIndex = -1;
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       
-      // Check if this line starts a product listing
-      const isProductLine = line.match(/^(\d+)\.\s+(.+?)\s+-\s+(.+?)(?:\.|\s+-)\s+Price:/i);
-      const isProductMetadata = line.match(/^(?:-\s*)?(?:Link:|Image:)|^\[View Product\]|^https?:\/\//i);
+      // Check if this is a product line
+      const isProductLine = line.match(/^(\d+)\.\s+(.+?)\s+-\s+.+?,\s+\$?[\d,]/i) ||
+                           line.match(/^(\d+)\.\s+(.+?)\s+-\s+.+?\s+-\s+Price:/i);
+      
+      // Check if this is product metadata
+      const isProductMetadata = line.match(/^(?:-\s*)?(?:Link:|Image:)/i) ||
+                               line.match(/^\[View Product\]/i) ||
+                               line.match(/^https?:\/\/(?:www\.)?(?:tentree\.com|cdn\.shopify\.com)/i) ||
+                               line.match(/^!\[/i);
       
       if (isProductLine && !inProductSection) {
-        // Start of product section - save previous text
-        if (currentText.length > 0) {
-          sections.push({
-            type: 'text',
-            content: currentText.join('\n').trim()
-          });
-          currentText = [];
-        }
+        // First product found
         inProductSection = true;
-        productStartIndex = i;
-      } else if (inProductSection && !isProductLine && !isProductMetadata && line.length > 0) {
-        // End of product section - add placeholder
-        sections.push({
-          type: 'products',
-          content: '[[PRODUCTS]]'
-        });
-        inProductSection = false;
-        currentText.push(lines[i]);
+        firstProductIndex = i;
+      } else if (inProductSection && !productSectionEnded) {
+        if (!isProductLine && !isProductMetadata && line.length > 0 && !line.match(/^Available/i)) {
+          // Product section ended
+          productSectionEnded = true;
+          afterProducts.push(lines[i]);
+        }
       } else if (!inProductSection) {
-        // Regular text
-        currentText.push(lines[i]);
+        // Before products
+        beforeProducts.push(lines[i]);
+      } else if (productSectionEnded) {
+        // After products
+        afterProducts.push(lines[i]);
       }
     }
     
-    // Handle remaining content
-    if (inProductSection) {
-      sections.push({
-        type: 'products',
-        content: '[[PRODUCTS]]'
-      });
-    } else if (currentText.length > 0) {
-      sections.push({
-        type: 'text',
-        content: currentText.join('\n').trim()
-      });
+    // If we found products, insert placeholder
+    if (firstProductIndex !== -1) {
+      return {
+        before: beforeProducts.join('\n').trim(),
+        hasProducts: true,
+        after: afterProducts.join('\n').trim()
+      };
     }
     
-    return sections;
-  }
-
-  function stripProductMarkdown(message) {
-    let cleaned = message;
-    cleaned = cleaned.replace(/^\d+\.\s+.+?\s+-\s+.+?(?:\s+-\s+Price:|\.\s+Price:)\s+\$?[\d,]+\.?\d*(?:\s*-\s*\$?[\d,]+\.?\d*)?.*$/gim, '');
-    cleaned = cleaned.replace(/^\s*-?\s*Available sizes?:.*$/gim, '');
-    cleaned = cleaned.replace(/^\s*-?\s*Link:\s*https?:\/\/.*$/gim, '');
-    cleaned = cleaned.replace(/\[View Product\]\(https?:\/\/[^\)]+\)/gi, '');
-    cleaned = cleaned.replace(/^\s*-?\s*Image:\s*!\[.*$/gim, '');
-    cleaned = cleaned.replace(/!\[(?:Image|Link|[^\]]*)\]\(https?:\/\/[^\)]+\)/g, '');
-    cleaned = cleaned.replace(/^https?:\/\/.*$/gm, '');
-    cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-    return cleaned;
+    // No products found
+    return {
+      before: message,
+      hasProducts: false,
+      after: ''
+    };
   }
 
   // Inject custom styles
@@ -763,17 +752,17 @@
       );
     });
 
-    // Message Component with Inline Products
+    // FIXED: Message Component with proper inline rendering
     const Message = React.memo(({ message, index, primaryColor, isMobile }) => {
       const products = useMemo(() => {
         return message.role === 'assistant' ? parseProducts(message.content) : [];
       }, [message.content, message.role]);
       
-      const sections = useMemo(() => {
+      const parsedContent = useMemo(() => {
         if (products.length === 0) {
-          return [{ type: 'text', content: message.content }];
+          return { before: message.content, hasProducts: false, after: '' };
         }
-        return parseMessageSections(message.content);
+        return parseMessageWithProducts(message.content);
       }, [message.content, products.length]);
 
       return React.createElement('div', {
@@ -820,22 +809,21 @@
               lineHeight: '1.6'
             }
           },
-            // Render sections with inline products
-            sections.map((section, idx) => {
-              if (section.type === 'text' && section.content) {
-                return React.createElement('div', {
-                  key: `text-${idx}`,
-                  style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
-                }, section.content);
-              } else if (section.type === 'products' && products.length > 0) {
-                return React.createElement(ProductCarousel, {
-                  key: `products-${idx}`,
-                  products,
-                  primaryColor
-                });
-              }
-              return null;
-            })
+            // Text before products
+            parsedContent.before && React.createElement('div', {
+              style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
+            }, parsedContent.before),
+            
+            // Products carousel inline
+            parsedContent.hasProducts && products.length > 0 && React.createElement(ProductCarousel, {
+              products,
+              primaryColor
+            }),
+            
+            // Text after products
+            parsedContent.after && React.createElement('div', {
+              style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
+            }, parsedContent.after)
           )
         )
       );
